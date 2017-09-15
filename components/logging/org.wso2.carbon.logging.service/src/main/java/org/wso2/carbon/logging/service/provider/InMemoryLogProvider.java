@@ -19,31 +19,65 @@ package org.wso2.carbon.logging.service.provider;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.log4j.Appender;
-import org.apache.log4j.Logger;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.FrameworkUtil;
+import org.osgi.framework.ServiceReference;
+import org.osgi.framework.ServiceRegistration;
+import org.osgi.service.component.ComponentContext;
 import org.wso2.carbon.base.ServerConfiguration;
 import org.wso2.carbon.context.PrivilegedCarbonContext;
 import org.wso2.carbon.logging.service.LogViewerException;
-import org.wso2.carbon.logging.service.appender.CarbonMemoryAppender;
+import org.wso2.carbon.logging.service.appenders.CarbonMemoryAppender;
+import org.wso2.carbon.logging.service.appenders.TenantAwareLogEvent;
 import org.wso2.carbon.logging.service.data.LogEvent;
 import org.wso2.carbon.logging.service.data.LoggingConfig;
 import org.wso2.carbon.logging.service.provider.api.LogProvider;
-import org.wso2.carbon.logging.service.util.LoggingConstants;
 import org.wso2.carbon.logging.service.util.LoggingUtil;
-import org.wso2.carbon.utils.logging.TenantAwareLoggingEvent;
-import org.wso2.carbon.utils.logging.TenantAwarePatternLayout;
+import org.wso2.carbon.utils.logging.CircularBuffer;
 
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
 
+/**
+ * @scr.component name="org.wso2.carbon.logging.service.provider.InMemoryLogProvider" immediate="true"
+ * @scr.reference name="org.wso2.carbon.logging.service.appenders"
+ * interface="org.wso2.carbon.logging.service.appenders.CarbonMemoryAppender"
+ * cardinality="1..1" policy="dynamic" bind="setCarbonMemoryAppender"
+ * unbind="unsetCarbonMemoryAppender"
+ */
 public class InMemoryLogProvider implements LogProvider {
 
     private static final Log log = LogFactory.getLog(InMemoryLogProvider.class);
     private static final int DEFAULT_NO_OF_LOGS = 100;
     private static final String SERVER_KEY = "ServerKey";
+    private ServiceRegistration serviceRegistration;
+    private CarbonMemoryAppender carbonMemoryAppender;
+
+    protected void activate(ComponentContext componentContext) {
+        try {
+            serviceRegistration = componentContext.getBundleContext().registerService(LogProvider.class.getName(),
+                    new InMemoryLogProvider(), null);
+            log.info("InMemoryLogProvider is activated");
+        } catch (Exception e) {
+            log.error("Cannot start InMemoryLogProvider component", e);
+        }
+    }
+
+    protected void setCarbonMemoryAppender(CarbonMemoryAppender memoryAppender) {
+    }
+
+    protected void unsetCarbonMemoryAppender(CarbonMemoryAppender memoryAppender) {
+    }
+
+    protected void deactivate(ComponentContext componentContext) {
+        log.info("InMemoryLogProvider Component is deactivated");
+        serviceRegistration.unregister();
+    }
 
     /**
      * Initialize the log provider by reading the property comes with logging configuration file
@@ -53,8 +87,21 @@ public class InMemoryLogProvider implements LogProvider {
      */
     @Override
     public void init(LoggingConfig loggingConfig) {
-        // nothing to do
+        BundleContext bundleContext = FrameworkUtil.getBundle(InMemoryLogProvider.class).getBundleContext();
+        try {
+            serviceRegistration = bundleContext.registerService(LogProvider.class.getName(),
+                    new InMemoryLogProvider(), null);
+            ServiceReference serviceReference = bundleContext.getServiceReference(CarbonMemoryAppender.class);
+            if(serviceReference != null) {
+                carbonMemoryAppender = (CarbonMemoryAppender) bundleContext.getService(serviceReference);
+            } else {
+                log.error("Service Reference is null");
+            }
+        } catch (Exception e) {
+            log.error(e);
+        }
     }
+
 
     @Override
     public List<String> getApplicationNames(String tenantDomain, String serverKey) throws LogViewerException {
@@ -72,18 +119,15 @@ public class InMemoryLogProvider implements LogProvider {
         return getSortedApplicationNames(appList);
     }
 
-
     @Override
     public List<LogEvent> getSystemLogs() throws LogViewerException {
         List<LogEvent> resultList = new ArrayList<LogEvent>();
-        Appender appender = Logger.getRootLogger().getAppender(
-                LoggingConstants.WSO2CARBON_MEMORY_APPENDER);
-        if (appender instanceof CarbonMemoryAppender) {
-            CarbonMemoryAppender memoryAppender = (CarbonMemoryAppender) appender;
-            List<TenantAwareLoggingEvent> tenantAwareLoggingEventList = getTenantAwareLoggingEventList(memoryAppender);
-            for (TenantAwareLoggingEvent tenantAwareLoggingEvent : tenantAwareLoggingEventList) {
-                if (tenantAwareLoggingEvent != null) {
-                    resultList.add(createLogEvent(tenantAwareLoggingEvent));
+        CircularBuffer<TenantAwareLogEvent> circularBuffer = carbonMemoryAppender.getCircularQueue();
+        if (circularBuffer != null) {
+            List<TenantAwareLogEvent> tenantAwareLogEventList = getTenantAwareLoggingEventList(carbonMemoryAppender);
+            for (TenantAwareLogEvent tenantAwareLogEvent : tenantAwareLogEventList) {
+                if (tenantAwareLogEvent != null) {
+                    resultList.add(createLogEvent(tenantAwareLogEvent));
                 }
             }
             return reverseLogList(resultList);
@@ -101,7 +145,7 @@ public class InMemoryLogProvider implements LogProvider {
         return defaultLogEvents;
     }
 
-    private List<TenantAwareLoggingEvent> getTenantAwareLoggingEventList(CarbonMemoryAppender memoryAppender) {
+    private List<TenantAwareLogEvent> getTenantAwareLoggingEventList(CarbonMemoryAppender memoryAppender) {
         int definedAmount;
         if (memoryAppender.getCircularQueue() != null) {
             definedAmount = memoryAppender.getBufferSize();
@@ -111,7 +155,7 @@ public class InMemoryLogProvider implements LogProvider {
                 return memoryAppender.getCircularQueue().get(definedAmount);
             }
         } else {
-            return new ArrayList<TenantAwareLoggingEvent>();
+            return new ArrayList<TenantAwareLogEvent>();
         }
     }
 
@@ -123,25 +167,20 @@ public class InMemoryLogProvider implements LogProvider {
     @Override
     public List<LogEvent> getLogsByAppName(String appName, String tenantDomain, String serverKey) throws LogViewerException {
         List<LogEvent> resultList = new ArrayList<LogEvent>();
-        Appender appender = Logger.getRootLogger().getAppender(
-                LoggingConstants.WSO2CARBON_MEMORY_APPENDER);
-        if (appender instanceof CarbonMemoryAppender) {
-            CarbonMemoryAppender memoryAppender = (CarbonMemoryAppender) appender;
-            List<TenantAwareLoggingEvent> tenantAwareLoggingEventList = getTenantAwareLoggingEventList(memoryAppender);
-            for (TenantAwareLoggingEvent tenantAwareLoggingEvent : tenantAwareLoggingEventList) {
-                if (tenantAwareLoggingEvent != null) {
-                    TenantAwarePatternLayout tenantIdPattern = new TenantAwarePatternLayout("%T");
-                    TenantAwarePatternLayout productPattern = new TenantAwarePatternLayout("%S");
-                    String productName = productPattern.format(tenantAwareLoggingEvent);
-                    String tenantId = tenantIdPattern.format(tenantAwareLoggingEvent);
+        CircularBuffer<TenantAwareLogEvent> circularBuffer = carbonMemoryAppender.getCircularQueue();
+        if (circularBuffer != null) {
+            List<TenantAwareLogEvent> tenantAwareLogEventList = getTenantAwareLoggingEventList(carbonMemoryAppender);
+            for (TenantAwareLogEvent tenantAwareLogEvent : tenantAwareLogEventList) {
+                if (tenantAwareLogEvent != null) {
+                    String productName = tenantAwareLogEvent.getServerName();
+                    String tenantId = String.valueOf(tenantAwareLogEvent.getTenantId());
                     if (isCurrentTenantId(tenantId, tenantDomain) && isCurrentProduct(productName, serverKey)) {
                         if (appName == null || "".equals(appName)) {
-                            resultList.add(createLogEvent(tenantAwareLoggingEvent));
+                            resultList.add(createLogEvent(tenantAwareLogEvent));
                         } else {
-                            TenantAwarePatternLayout appPattern = new TenantAwarePatternLayout("%A");
-                            String currAppName = appPattern.format(tenantAwareLoggingEvent);
+                            String currAppName = tenantAwareLogEvent.getServiceName();
                             if (appName.equals(currAppName)) {
-                                resultList.add(createLogEvent(tenantAwareLoggingEvent));
+                                resultList.add(createLogEvent(tenantAwareLogEvent));
                             }
                         }
                     }
@@ -197,25 +236,22 @@ public class InMemoryLogProvider implements LogProvider {
 
     private List<LogEvent> getLogs(String appName, String tenantDomain, String serverKey) {
         List<LogEvent> resultList = new ArrayList<LogEvent>();
-        Appender appender = Logger.getRootLogger().getAppender(
-                LoggingConstants.WSO2CARBON_MEMORY_APPENDER);
-        if (appender instanceof CarbonMemoryAppender) {
-            CarbonMemoryAppender memoryAppender = (CarbonMemoryAppender) appender;
-            List<TenantAwareLoggingEvent> tenantAwareLoggingEventList = getTenantAwareLoggingEventList(memoryAppender);
-            for (TenantAwareLoggingEvent tenantAwareLoggingEvent : tenantAwareLoggingEventList) {
-                if (tenantAwareLoggingEvent != null) {
-                    TenantAwarePatternLayout tenantIdPattern = new TenantAwarePatternLayout("%T");
-                    TenantAwarePatternLayout productPattern = new TenantAwarePatternLayout("%S");
-                    String productName = productPattern.format(tenantAwareLoggingEvent);
-                    String tenantId = tenantIdPattern.format(tenantAwareLoggingEvent);
+        CircularBuffer<TenantAwareLogEvent> circularBuffer = carbonMemoryAppender.getCircularQueue();
+        if (circularBuffer != null) {
+            List<TenantAwareLogEvent> tenantAwareLogEventList = getTenantAwareLoggingEventList(carbonMemoryAppender);
+            for (TenantAwareLogEvent tenantAwareLogEvent : tenantAwareLogEventList) {
+                if (tenantAwareLogEvent != null) {
+                    String productName = tenantAwareLogEvent.getServerName();
+                    String tenantId = String.valueOf(tenantAwareLogEvent.getTenantId());
                     if (isCurrentTenantId(tenantId, tenantDomain) && isCurrentProduct(productName, serverKey)) {
                         if (appName == null || "".equals(appName)) {
-                            resultList.add(createLogEvent(tenantAwareLoggingEvent));
+                            resultList.add(createLogEvent(tenantAwareLogEvent));
                         } else {
-                            TenantAwarePatternLayout appPattern = new TenantAwarePatternLayout("%A");
-                            String currAppName = appPattern.format(tenantAwareLoggingEvent);
+                            String currAppName = tenantAwareLogEvent.getServiceName();
                             if (appName.equals(currAppName)) {
-                                resultList.add(createLogEvent(tenantAwareLoggingEvent));
+                                if (appName.equals(currAppName)) {
+                                    resultList.add(createLogEvent(tenantAwareLogEvent));
+                                }
                             }
                         }
                     }
@@ -263,41 +299,28 @@ public class InMemoryLogProvider implements LogProvider {
 
     }
 
-    private LogEvent createLogEvent(TenantAwareLoggingEvent logEvt) {
-        Appender appender = Logger.getRootLogger().getAppender(
-                LoggingConstants.WSO2CARBON_MEMORY_APPENDER);
-        CarbonMemoryAppender memoryAppender = (CarbonMemoryAppender) appender;
-        List<String> patterns = Arrays.asList(memoryAppender.getColumnList().split(","));
+    private LogEvent createLogEvent(TenantAwareLogEvent logEvt) {
         LogEvent event = new LogEvent();
-        for (String pattern : patterns) {
-            String currEle = (pattern).replace("%", "");
-            TenantAwarePatternLayout patternLayout = new TenantAwarePatternLayout("%" + currEle);
-            if ("T".equals(currEle)) {
-                event.setTenantId(patternLayout.format(logEvt));
-            } else if ("S".equals(currEle)) {
-                event.setServerName(patternLayout.format(logEvt));
-            } else if ("A".equals(currEle)) {
-                event.setAppName(patternLayout.format(logEvt));
-            } else if ("d".equals(currEle)) {
-                event.setLogTime(patternLayout.format(logEvt));
-            } else if ("c".equals(currEle)) {
-                event.setLogger(patternLayout.format(logEvt));
-            } else if ("p".equals(currEle)) {
-                event.setPriority(patternLayout.format(logEvt));
-            } else if ("m".equals(currEle)) {
-                event.setMessage(patternLayout.format(logEvt));
-            } else if ("I".equals(currEle)) {
-                event.setInstance(patternLayout.format(logEvt));
-            } else if ("Stacktrace".equals(currEle)) {
-                if (logEvt.getThrowableInformation() != null) {
-                    event.setStacktrace(getStacktrace(logEvt.getThrowableInformation().getThrowable()));
-                } else {
-                    event.setStacktrace("");
-                }
-            } else if ("H".equals(currEle)) {
-                event.setIp(patternLayout.format(logEvt));
-            }
+        event.setTenantId(logEvt.getTenantId());
+        event.setServerName(logEvt.getServerName());
+        event.setAppName(logEvt.getServiceName());
+
+        Date date = new Date(logEvt.getMutableLogEvent().getTimeMillis());
+        DateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss,SSS");
+        String timeFormatted = formatter.format(date);
+        event.setLogTime(timeFormatted);
+
+        event.setLogger(logEvt.getMutableLogEvent().getLoggerName());
+        event.setPriority(logEvt.getMutableLogEvent().getLevel().toString());
+        event.setMessage(logEvt.getMutableLogEvent().getFormattedMessage());
+        event.setInstance(logEvt.getInstance());
+        if (logEvt.getMutableLogEvent().getThrowable() != null) {
+            event.setStacktrace(getStacktrace(logEvt.getMutableLogEvent().getThrowable()));
+        } else {
+            event.setStacktrace("");
         }
+        event.setIp(logEvt.getIp());
+
         return event;
     }
 
@@ -317,21 +340,15 @@ public class InMemoryLogProvider implements LogProvider {
 
     private List<LogEvent> getLogsForKey(String keyword, String appName, String tenantDomain, String serverKey) {
         List<LogEvent> resultList = new ArrayList<LogEvent>();
-        Appender appender = Logger.getRootLogger().getAppender(
-                LoggingConstants.WSO2CARBON_MEMORY_APPENDER);
-        if (appender instanceof CarbonMemoryAppender) {
-            CarbonMemoryAppender memoryAppender = (CarbonMemoryAppender) appender;
-            List<TenantAwareLoggingEvent> tenantAwareLoggingEventList = getTenantAwareLoggingEventList(memoryAppender);
-            for (TenantAwareLoggingEvent tenantAwareLoggingEvent : tenantAwareLoggingEventList) {
-                if (tenantAwareLoggingEvent != null) {
-                    TenantAwarePatternLayout tenantIdPattern = new TenantAwarePatternLayout("%T");
-                    TenantAwarePatternLayout productPattern = new TenantAwarePatternLayout("%S");
-                    TenantAwarePatternLayout messagePattern = new TenantAwarePatternLayout("%m");
-                    TenantAwarePatternLayout loggerPattern = new TenantAwarePatternLayout("%c");
-                    String productName = productPattern.format(tenantAwareLoggingEvent);
-                    String tenantId = tenantIdPattern.format(tenantAwareLoggingEvent);
-                    String result = messagePattern.format(tenantAwareLoggingEvent);
-                    String logger = loggerPattern.format(tenantAwareLoggingEvent);
+        CircularBuffer<TenantAwareLogEvent> circularBuffer = carbonMemoryAppender.getCircularQueue();
+        if (circularBuffer != null) {
+            List<TenantAwareLogEvent> tenantAwareLogEventList = getTenantAwareLoggingEventList(carbonMemoryAppender);
+            for (TenantAwareLogEvent tenantAwareLogEvent : tenantAwareLogEventList) {
+                if (tenantAwareLogEvent != null) {
+                    String productName = tenantAwareLogEvent.getServerName();
+                    String tenantId = String.valueOf(tenantAwareLogEvent.getTenantId());
+                    String result = carbonMemoryAppender.getLayout().toSerializable(tenantAwareLogEvent.getMutableLogEvent()).toString();
+                    String logger = tenantAwareLogEvent.getMutableLogEvent().getLoggerName();
                     boolean isInLogMessage = result != null
                             && (result.toLowerCase().contains(keyword.toLowerCase()));
                     boolean isInLogger = logger != null
@@ -339,12 +356,13 @@ public class InMemoryLogProvider implements LogProvider {
                     if (isCurrentTenantId(tenantId, tenantDomain) && isCurrentProduct(productName, serverKey)
                             && (isInLogMessage || isInLogger)) {
                         if (appName == null || "".equals(appName)) {
-                            resultList.add(createLogEvent(tenantAwareLoggingEvent));
+                            resultList.add(createLogEvent(tenantAwareLogEvent));
                         } else {
-                            TenantAwarePatternLayout appPattern = new TenantAwarePatternLayout("%A");
-                            String currAppName = appPattern.format(tenantAwareLoggingEvent);
+                            String currAppName = tenantAwareLogEvent.getServiceName();
                             if (appName.equals(currAppName)) {
-                                resultList.add(createLogEvent(tenantAwareLoggingEvent));
+                                if (appName.equals(currAppName)) {
+                                    resultList.add(createLogEvent(tenantAwareLogEvent));
+                                }
                             }
                         }
                     }
@@ -358,26 +376,23 @@ public class InMemoryLogProvider implements LogProvider {
 
     private List<LogEvent> getLogsForType(String type, String appName, String tenantDomain, String serverKey) {
         List<LogEvent> resultList = new ArrayList<LogEvent>();
-        Appender appender = Logger.getRootLogger().getAppender(
-                LoggingConstants.WSO2CARBON_MEMORY_APPENDER);
-        if (appender instanceof CarbonMemoryAppender) {
-            CarbonMemoryAppender memoryAppender = (CarbonMemoryAppender) appender;
-            List<TenantAwareLoggingEvent> tenantAwareLoggingEventList = getTenantAwareLoggingEventList(memoryAppender);
-            for (TenantAwareLoggingEvent tenantAwareLoggingEvent : tenantAwareLoggingEventList) {
-                if (tenantAwareLoggingEvent != null) {
-                    TenantAwarePatternLayout tenantIdPattern = new TenantAwarePatternLayout("%T");
-                    TenantAwarePatternLayout productPattern = new TenantAwarePatternLayout("%S");
-                    String priority = tenantAwareLoggingEvent.getLevel().toString();
-                    String productName = productPattern.format(tenantAwareLoggingEvent);
-                    String tenantId = tenantIdPattern.format(tenantAwareLoggingEvent);
+        CircularBuffer<TenantAwareLogEvent> circularBuffer = carbonMemoryAppender.getCircularQueue();
+        if (circularBuffer != null) {
+            List<TenantAwareLogEvent> tenantAwareLogEventList = getTenantAwareLoggingEventList(carbonMemoryAppender);
+            for (TenantAwareLogEvent tenantAwareLogEvent : tenantAwareLogEventList) {
+                if (tenantAwareLogEvent != null) {
+                    String priority = tenantAwareLogEvent.getMutableLogEvent().getLevel().toString();
+                    String productName = tenantAwareLogEvent.getServerName();
+                    String tenantId = String.valueOf(tenantAwareLogEvent.getTenantId());
                     if ((priority.equals(type) && isCurrentTenantId(tenantId, tenantDomain) && isCurrentProduct(productName, serverKey))) {
                         if (appName == null || "".equals(appName)) {
-                            resultList.add(createLogEvent(tenantAwareLoggingEvent));
+                            resultList.add(createLogEvent(tenantAwareLogEvent));
                         } else {
-                            TenantAwarePatternLayout appPattern = new TenantAwarePatternLayout("%A");
-                            String currAppName = appPattern.format(tenantAwareLoggingEvent);
+                            String currAppName = tenantAwareLogEvent.getServiceName();
                             if (appName.equals(currAppName)) {
-                                resultList.add(createLogEvent(tenantAwareLoggingEvent));
+                                if (appName.equals(currAppName)) {
+                                    resultList.add(createLogEvent(tenantAwareLogEvent));
+                                }
                             }
                         }
                     }

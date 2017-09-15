@@ -18,18 +18,21 @@ package org.wso2.carbon.logging.service;
 
 import org.apache.axis2.clustering.ClusteringAgent;
 import org.apache.axis2.clustering.ClusteringFault;
+import org.apache.commons.collections.iterators.IteratorEnumeration;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.log4j.Appender;
-import org.apache.log4j.AppenderSkeleton;
-import org.apache.log4j.FileAppender;
-import org.apache.log4j.Layout;
-import org.apache.log4j.Level;
-import org.apache.log4j.LogManager;
-import org.apache.log4j.Logger;
-import org.apache.log4j.PatternLayout;
-import org.apache.log4j.Priority;
-import org.apache.log4j.net.SyslogAppender;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Appender;
+import org.apache.logging.log4j.core.Layout;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.appender.FileAppender;
+import org.apache.logging.log4j.core.appender.SyslogAppender;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.layout.PatternLayout;
+import org.apache.logging.log4j.core.net.Facility;
 import org.wso2.carbon.logging.service.config.SyslogConfigManager;
 import org.wso2.carbon.logging.service.data.AppenderData;
 import org.wso2.carbon.logging.service.data.LogData;
@@ -83,7 +86,7 @@ public class LoggingAdmin {
         boolean isLogFileFound = Boolean.valueOf(LoggingUtil.getConfigurationProperty(
                 LoggingConstants.LOG4J_FILE_FOUND));
         if (!isLogFileFound) {
-            throw new Exception("Log4j.properties file not found, please put a log4j.properties file to the classpath");
+            throw new Exception("Log4j2.properties file not found, please put a log4j2.properties file to the classpath");
         }
 
         LogData logData = new LogData();
@@ -105,7 +108,8 @@ public class LoggingAdmin {
         if (logNameFilter != null) {
             logNameFilter = logNameFilter.trim();
         }
-        Enumeration loggers = LogManager.getCurrentLoggers();
+        LoggerContext logContext = (LoggerContext) LogManager.getContext(false);
+        Enumeration loggers = (Enumeration) logContext.getConfiguration().getAppenders();
         List<LoggerData> list = new ArrayList<LoggerData>();
         while (loggers.hasMoreElements()) {
             Logger logger = (Logger) loggers.nextElement();
@@ -115,8 +119,8 @@ public class LoggingAdmin {
                 String parentName =
                         (logger.getParent() == null ? "-" : logger.getParent().getName());
                 LoggerData loggerData = new LoggerData(logger.getName(),
-                        logger.getEffectiveLevel().toString(),
-                        logger.getAdditivity(),
+                        logger.getLevel().toString(),
+                        logger.isAdditive(),
                         parentName);
                 list.add(loggerData);
             }
@@ -127,13 +131,13 @@ public class LoggingAdmin {
                         return arg0.getName().compareTo(arg1.getName());
                     }
                 });
-        Logger rootLogger = LogManager.getRootLogger();
+        Logger rootLogger = (Logger) LogManager.getRootLogger();
         if ((logNameFilter != null && beginsWith && rootLogger.getName().startsWith(logNameFilter)) || // Logger name begins with logNameFilter
                 (logNameFilter != null && !beginsWith && rootLogger.getName().indexOf(logNameFilter) != -1) || // Logger name contains logNameFilter
                 (logNameFilter == null || logNameFilter.trim().length() == 0)) {  // No logNameFilter specified
             LoggerData loggerData = new LoggerData(rootLogger.getName(),
-                    rootLogger.getEffectiveLevel().toString(),
-                    rootLogger.getAdditivity(),
+                    rootLogger.getLevel().toString(),
+                    rootLogger.isAdditive(),
                     "-");
             list.add(0, loggerData);
         }
@@ -145,7 +149,7 @@ public class LoggingAdmin {
      * @return The appender information the given appender with name <code>appenderName</code>
      */
     public AppenderData getAppenderData(String appenderName) {
-        Logger rootLogger = Logger.getRootLogger();
+        Logger rootLogger = (Logger) LogManager.getRootLogger();
         Appender targetAppender;
         if (appenderName == null || appenderName.length() == 0) {
             targetAppender = getTheFirstAppenderInLogger(rootLogger);
@@ -154,7 +158,8 @@ public class LoggingAdmin {
         }
 
         if (targetAppender == null) {
-            Enumeration loggers = LogManager.getCurrentLoggers();
+            LoggerContext logContext = (LoggerContext) LogManager.getContext(false);
+            Enumeration loggers = (Enumeration) logContext.getConfiguration().getAppenders();
             while (loggers.hasMoreElements()) {
                 Logger logger = (Logger) loggers.nextElement();
                 targetAppender = getAppenderInLoggerWithName(logger, appenderName);
@@ -168,12 +173,12 @@ public class LoggingAdmin {
 
     public LoggerData getLoggerData(String loggerName) {
 
-        Logger logger = LogManager.getLogger(loggerName);
+        Logger logger = (Logger) LogManager.getLogger(loggerName);
         String parentName =
                 (logger.getParent() == null ? "empty" : logger.getParent().getName());
         return new LoggerData(logger.getName(),
-                logger.getEffectiveLevel().toString(),
-                logger.getAdditivity(),
+                logger.getLevel().toString(),
+                logger.isAdditive(),
                 parentName);
     }
 
@@ -233,14 +238,14 @@ public class LoggingAdmin {
 
         // update system appender data
         Set<Appender> appenderSet = new HashSet<Appender>();
-        Logger rootLogger = Logger.getRootLogger();
-        addAppendersToSet(rootLogger.getAllAppenders(), appenderSet);
+        LoggerContext logContext = (LoggerContext) LogManager.getContext(false);
+        Enumeration loggers = (Enumeration) logContext.getConfiguration().getAppenders();
+        addAppendersToSet(loggers, appenderSet);
 
-        Enumeration loggers = LogManager.getCurrentLoggers();
         while (loggers.hasMoreElements()) {
             Logger logger = (Logger) loggers.nextElement();
             if (logger.getLevel() != null) {
-                addAppendersToSet(logger.getAllAppenders(), appenderSet);
+                addAppendersToSet(loggers, appenderSet);
             }
         }
         Appender appender = null;
@@ -262,7 +267,7 @@ public class LoggingAdmin {
             if (isFileAppender) {
                 //TODO add syslogPattern to  appenderPattern
                 appenderPattern = addSyslogPattern(appenderPattern);
-                
+
                 // we persist the log file path user enters rather than calculating the absolute path
                 String logFilePathToPersist = logFileName;
 
@@ -317,32 +322,31 @@ public class LoggingAdmin {
                 sendLoggingConfigSyncClusterMessage();
             }
 
-            if ((appender.getLayout() != null) &&
-                    (appender.getLayout() instanceof PatternLayout)) {
-                ((PatternLayout) appender.getLayout()).setConversionPattern(appenderPattern);
+            if ((appender.getLayout() != null) && (appender.getLayout() instanceof PatternLayout)) {
+                PatternLayout.newSerializerBuilder().setPattern(appenderPattern);
             }
 
             if (appender instanceof FileAppender) {
+                ((FileAppender) appender).newBuilder().withFileName(logFileName);
 
-                ((FileAppender) appender).setFile(logFileName);
                 if (LoggingAdmin.log.isDebugEnabled()) {
                     LoggingAdmin.log.debug("change the logfile of the appender ==> " +
                             appender.getName() + " to " + logFileName);
                 }
-                ((FileAppender) appender).activateOptions();
+//                ((FileAppender) appender).activateOptions();
             }
 
             if (appender instanceof SyslogAppender) {
                 SyslogAppender syslogAppender = (SyslogAppender) appender;
-                syslogAppender.setSyslogHost(sysLogHost);
-                syslogAppender.setFacility(facility);
+                syslogAppender.newSyslogAppenderBuilder().withHost(sysLogHost);
+                syslogAppender.newSyslogAppenderBuilder().setFacility(Facility.toFacility(facility));
             }
 
             // set the threshold
-            if (appender instanceof AppenderSkeleton) {
-                AppenderSkeleton appenderSkeleton = (AppenderSkeleton) appender;
-                appenderSkeleton.setThreshold(Level.toLevel(threshold));
-                appenderSkeleton.activateOptions();
+            if (appender instanceof AbstractAppender) {
+                AbstractAppender abstractAppender = (AbstractAppender) appender;
+                LoggerConfig loggerConfig = new LoggerConfig(appenderName, Level.toLevel(threshold), true);
+                loggerConfig.addAppender(abstractAppender, null, null);
             }
         }
     }
@@ -382,20 +386,22 @@ public class LoggingAdmin {
             sendLoggingConfigSyncClusterMessage();
         }
         // update root logger details
-        Logger rootLogger = Logger.getRootLogger();
+        Logger rootLogger = (Logger) LogManager.getRootLogger();
         rootLogger.setLevel(Level.toLevel(logLevel));
-        addAppendersToSet(rootLogger.getAllAppenders(), appenderSet);
+
+        LoggerConfig loggerConfig = new LoggerConfig(rootLogger.getName(), Level.toLevel(logLevel), false);
+        Enumeration loggers = Collections.enumeration(loggerConfig.getAppenderRefs());
+        addAppendersToSet(loggers, appenderSet);
 
         // update logger and appender data, following are set
         // 1. log level of all the loggers to logLevel
         // 2. pattern of all the appenders to logpattern
-        Enumeration loggersEnum = LogManager.getCurrentLoggers();
+        Enumeration loggersEnum = new IteratorEnumeration(loggerConfig.getAppenders().keySet().iterator());
         Level systemLevel = Level.toLevel(logLevel);
         while (loggersEnum.hasMoreElements()) {
-            Logger logger = (Logger) loggersEnum.nextElement();
             // we ignore all class level defined loggers
-            addAppendersToSet(logger.getAllAppenders(), appenderSet);
-            logger.setLevel(systemLevel);
+            addAppendersToSet((Enumeration) loggersEnum.nextElement(), appenderSet);
+            new LoggerConfig((String) loggersEnum.nextElement(), systemLevel, false);
         }
 
         //Update the logger data according stored in the registry
@@ -403,7 +409,7 @@ public class LoggingAdmin {
         if (loggerCollection != null) {
             String[] loggerResourcePaths = loggerCollection.getChildren();
             for (String loggerResourcePath : loggerResourcePaths) {
-                Logger logger = LogManager.getLogger(loggerResourcePath.substring(LoggingConstants.LOGGERS.length()));
+                Logger logger = (Logger) LogManager.getLogger(loggerResourcePath.substring(LoggingConstants.LOGGERS.length()));
                 Resource loggerResource = registryManager.getLogger(loggerResourcePath);
                 if (loggerResource != null && logger != null) {
                     loggerResource.setProperty(LoggingConstants.LoggerProperties.LOG_LEVEL, logLevel);
@@ -411,13 +417,11 @@ public class LoggingAdmin {
             }
         }
 
-        Layout patternLayout = new PatternLayout(logPattern);
         for (Appender appender : appenderSet) {
-            if (appender instanceof AppenderSkeleton) {
-                AppenderSkeleton appenderSkeleton = (AppenderSkeleton) appender;
-                appenderSkeleton.setThreshold(systemLevel);
-                appenderSkeleton.setLayout(patternLayout);
-                appenderSkeleton.activateOptions();
+            if (appender instanceof AbstractAppender) {
+                AbstractAppender abstractAppender = (AbstractAppender) appender;
+                PatternLayout.newSerializerBuilder().setPattern(logPattern.toString());
+                loggerConfig.addAppender(abstractAppender, systemLevel, null);
             }
         }
 
@@ -430,7 +434,7 @@ public class LoggingAdmin {
                         LoggingConstants.APPENDERS.length()));
                 Resource appenderResource = registryManager.getAppender(appenderResourcePath);
                 if (appenderResource != null && appender != null) {
-                    if (appender instanceof AppenderSkeleton) {
+                    if (appender instanceof AbstractAppender) {
                         appenderResource.setProperty(LoggingConstants.AppenderProperties.THRESHOLD, logLevel);
                         appenderResource.setProperty(LoggingConstants.AppenderProperties.PATTERN, logPattern);
                     }
@@ -445,7 +449,7 @@ public class LoggingAdmin {
                                  boolean persist) throws Exception {
 
         //update logger data in current system
-        Logger logger = LogManager.getLogger(loggerName);
+        Logger logger = (Logger) LogManager.getLogger(loggerName);
 
         if (logger != null) {
             if (persist) {
@@ -455,7 +459,7 @@ public class LoggingAdmin {
             }
 
             logger.setLevel(Level.toLevel(loggerLevel));
-            logger.setAdditivity(additivity);
+            logger.setAdditive(additivity);
             if (LoggingAdmin.log.isDebugEnabled()) {
                 LoggingAdmin.log.debug("Set the log level of logger ==>" + logger.getName() +
                         " to " + logger.getLevel().toString());
@@ -465,14 +469,14 @@ public class LoggingAdmin {
 
     private AppenderData[] getAllAppenderData() {
         Set<Appender> appenderSet = new HashSet<Appender>();
-        Logger rootLogger = Logger.getRootLogger();
-        Enumeration appenders = rootLogger.getAllAppenders();
+        LoggerContext logContext = (LoggerContext) LogManager.getContext(false);
+        Enumeration appenders = (Enumeration) logContext.getConfiguration().getAppenders();
         addAppendersToSet(appenders, appenderSet);
 
-        Enumeration loggers = LogManager.getCurrentLoggers();
+        Enumeration loggers = Collections.enumeration(logContext.getLoggers());
         while (loggers.hasMoreElements()) {
             Logger logger = (Logger) loggers.nextElement();
-            addAppendersToSet(logger.getAllAppenders(), appenderSet);
+            addAppendersToSet(new IteratorEnumeration(logger.getAppenders().keySet().iterator()), appenderSet);
         }
         AppenderData[] appenderDataArray = new AppenderData[appenderSet.size()];
         int i = 0;
@@ -519,31 +523,27 @@ public class LoggingAdmin {
             if (layout instanceof PatternLayout) {
                 appenderData.setPattern(((PatternLayout) layout).getConversionPattern());
             }
-            if (targetAppender instanceof AppenderSkeleton) {          // normally all the appenders inherit from AppenderSkelton
-                AppenderSkeleton appender = (AppenderSkeleton) targetAppender;
-                Priority priority = appender.getThreshold();
-                if (priority != null) {
-                    appenderData.setThreshold(priority.toString());
-                } else {
-                    appender.setThreshold(Level.toLevel(Priority.DEBUG_INT));
-                    appenderData.setThreshold("DEBUG");
-                }
+            if (targetAppender instanceof AbstractAppender) {          // normally all the appenders inherit from AppenderSkelton
+                AbstractAppender appender = (AbstractAppender) targetAppender;
+                LoggerConfig loggerConfig = new LoggerConfig(appender.getName(), null, false);
+                Level priority = loggerConfig.getLevel();
+                appenderData.setThreshold(priority.toString());
             }
             if (targetAppender instanceof SyslogAppender) { //NOTE: Don't make this an else if
                 SyslogAppender appender = (SyslogAppender) targetAppender;
                 appenderData.setIsSysLogAppender(true);
-                appenderData.setFacility(appender.getFacility());
-                appenderData.setSysLogHost(appender.getSyslogHost());
+                appenderData.setFacility(appender.newSyslogAppenderBuilder().getFacility().toString());
+                appenderData.setSysLogHost(appender.newSyslogAppenderBuilder().getHost());
             } else if (targetAppender instanceof FileAppender) {
                 appenderData.setIsFileAppender(true);
-                appenderData.setLogFile(((FileAppender) targetAppender).getFile());
+                appenderData.setLogFile(((FileAppender) targetAppender).getFileName());
             }
         }
         return appenderData;
     }
 
     private Appender getAppenderInLoggerWithName(Logger logger, String appenderName) {
-        Enumeration appenders = logger.getAllAppenders();
+        Enumeration appenders = (Enumeration) logger.getAppenders();
         Appender targetAppender = null;
         while (appenders.hasMoreElements()) {
             Appender appender = (Appender) appenders.nextElement();
@@ -556,7 +556,7 @@ public class LoggingAdmin {
     }
 
     private Appender getTheFirstAppenderInLogger(Logger logger) {
-        Enumeration appenders = logger.getAllAppenders();
+        Enumeration appenders = (Enumeration) logger.getAppenders();
         Appender targetAppender = null;
         if (appenders.hasMoreElements()) {
             targetAppender = (Appender) appenders.nextElement();
@@ -567,8 +567,9 @@ public class LoggingAdmin {
     private boolean isALogLevel(String logLevelToTest) {
         boolean returnValue = false;
         for (String logLevel : logLevels) {
-            if (logLevel.equalsIgnoreCase(logLevelToTest))
+            if (logLevel.equalsIgnoreCase(logLevelToTest)) {
                 returnValue = true;
+            }
         }
         return returnValue;
     }

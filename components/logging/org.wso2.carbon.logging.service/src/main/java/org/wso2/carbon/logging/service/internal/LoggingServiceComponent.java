@@ -122,7 +122,7 @@ public class LoggingServiceComponent {
         //checking whether log4j.properies file is changed.
         File confFolder = new File(CarbonUtils.getCarbonConfigDirPath());
         String loggingPropFilePath = confFolder.getAbsolutePath() + File.separator +
-                "log4j.properties";
+                "log4j2.properties";
         // URL url = Thread.currentThread().getContextClassLoader().getResource("log4j.properties");
         File log4jFile = new File(loggingPropFilePath);
 
@@ -147,8 +147,6 @@ public class LoggingServiceComponent {
                     Long.toString(currentLastModified));
             //Remove all the entries in the registry
             LoggingUtil.removeAllLoggersAndAppenders();
-        } else {
-            LoggingUtil.loadCustomConfiguration();
         }
     }
 }

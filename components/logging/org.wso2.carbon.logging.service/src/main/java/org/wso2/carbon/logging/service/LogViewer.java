@@ -17,17 +17,14 @@ package org.wso2.carbon.logging.service;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.log4j.FileAppender;
-import org.apache.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.FileAppender;
 import org.wso2.carbon.base.MultitenantConstants;
 import org.wso2.carbon.context.CarbonContext;
 import org.wso2.carbon.logging.service.config.LoggingConfigManager;
 import org.wso2.carbon.logging.service.config.ServiceConfigManager;
-import org.wso2.carbon.logging.service.data.LogEvent;
-import org.wso2.carbon.logging.service.data.LogFileInfo;
-import org.wso2.carbon.logging.service.data.LoggingConfig;
-import org.wso2.carbon.logging.service.data.PaginatedLogEvent;
-import org.wso2.carbon.logging.service.data.PaginatedLogFileInfo;
+import org.wso2.carbon.logging.service.data.*;
 import org.wso2.carbon.logging.service.provider.api.LogFileProvider;
 import org.wso2.carbon.logging.service.provider.api.LogProvider;
 import org.wso2.carbon.logging.service.util.LoggingConstants;
@@ -52,10 +49,10 @@ public class LogViewer {
 
     private static final Log log = LogFactory.getLog(LogViewer.class);
     private static final String LOGGING_CONFIG_FILE_WITH_PATH = CarbonUtils.getCarbonConfigDirPath()
-                                                    + RegistryConstants.PATH_SEPARATOR
-                                                    + LoggingConstants.ETC_DIR
-                                                    + RegistryConstants.PATH_SEPARATOR
-                                                    + LoggingConstants.LOGGING_CONF_FILE;
+            + RegistryConstants.PATH_SEPARATOR
+            + LoggingConstants.ETC_DIR
+            + RegistryConstants.PATH_SEPARATOR
+            + LoggingConstants.LOGGING_CONF_FILE;
     private static LoggingConfig loggingConfig;
     private static LogFileProvider logFileProvider;
     private static LogProvider logProvider;
@@ -90,7 +87,7 @@ public class LogViewer {
                 logProvider.init(loggingConfig);
             } else {
                 String msg = "Log provider is not defined in logging configuration file : " +
-                             LOGGING_CONFIG_FILE_WITH_PATH;
+                        LOGGING_CONFIG_FILE_WITH_PATH;
                 throw new LoggingConfigReaderException(msg);
             }
         } catch (Exception e) {
@@ -120,7 +117,7 @@ public class LogViewer {
                 logFileProvider.init(loggingConfig);
             } else {
                 String msg = "Log file provider is not defined in logging configuration file : " +
-                             LOGGING_CONFIG_FILE_WITH_PATH;
+                        LOGGING_CONFIG_FILE_WITH_PATH;
                 throw new LoggingConfigReaderException(msg);
             }
         } catch (Exception e) {
@@ -168,7 +165,7 @@ public class LogViewer {
                                                         String serviceName)
             throws LogViewerException {
         List<LogFileInfo> logFileInfoList = logFileProvider.getLogFileInfoList(tenantDomain,
-                                                                               serviceName);
+                serviceName);
         return getPaginatedLogFileInfo(pageNumber, logFileInfoList);
     }
 
@@ -229,11 +226,11 @@ public class LogViewer {
     }
 
     public boolean isFileAppenderConfiguredForST() {
-        Logger rootLogger = Logger.getRootLogger();
-        FileAppender logger = (FileAppender) rootLogger.getAppender("CARBON_LOGFILE");
+        LoggerContext logContext = (LoggerContext) LogManager.getContext(false);
+        FileAppender logger = logContext.getConfiguration().getAppender("CARBON_LOGFILE");
         return logger != null
-               && CarbonContext.getThreadLocalCarbonContext()
-                               .getTenantId() == MultitenantConstants.SUPER_TENANT_ID;
+                && CarbonContext.getThreadLocalCarbonContext()
+                .getTenantId() == MultitenantConstants.SUPER_TENANT_ID;
     }
 
     public LogEvent[] getAllSystemLogs() throws LogViewerException {

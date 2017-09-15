@@ -46,13 +46,11 @@
                         </Export-Package>
                         <Import-Package>
                             !org.wso2.carbon.logging.service.*;version="4.3.0",
+                            org.wso2.carbon.logging.service.appenders.*,
                             org.apache.axis2.*; version="${axis2.osgi.version.range}",
                             org.wso2.carbon.registry.core.*;version="1.0.1",
                             org.apache.commons.logging,
-                            org.apache.log4j; version="0.0.0",
-                            org.apache.log4j.net;
-                            version="0.0.0",
-                            org.apache.log4j.spi; version="0.0.0",
+                            org.apache.logging.log4j.*,
                             *;resolution:=optional,
                         </Import-Package>
                         <DynamicImport-Package>*</DynamicImport-Package>
@@ -79,6 +77,18 @@
             <groupId>org.testng</groupId>
             <artifactId>testng</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.ops4j.pax.logging</groupId>
+            <artifactId>pax-logging-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.ops4j.pax.logging</groupId>
+            <artifactId>pax-logging-log4j2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.wso2.carbon.commons</groupId>
+            <artifactId>org.wso2.carbon.logging.service.appenders</artifactId>
         </dependency>
     </dependencies>
 

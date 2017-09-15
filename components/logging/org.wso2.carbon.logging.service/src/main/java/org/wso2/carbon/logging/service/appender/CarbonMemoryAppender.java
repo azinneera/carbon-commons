@@ -40,6 +40,8 @@ import java.util.logging.LogRecord;
  * This appender will be used to capture the logs and later send to clients, if
  * requested via the logging web service. This maintains a circular buffer, of
  * some fixed amount (say 100).
+ *
+ * @deprecated Replaced by {@link org.wso2.carbon.logging.service.appenders.CarbonMemoryAppender}
  */
 public class CarbonMemoryAppender extends AppenderSkeleton implements LoggingBridge {
 

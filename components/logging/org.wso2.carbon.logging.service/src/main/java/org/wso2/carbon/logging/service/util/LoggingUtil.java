@@ -18,22 +18,26 @@ package org.wso2.carbon.logging.service.util;
 
 import org.apache.axis2.context.ConfigurationContext;
 import org.apache.axis2.description.AxisService;
+import org.apache.commons.collections.iterators.IteratorEnumeration;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.log4j.Appender;
-import org.apache.log4j.AppenderSkeleton;
-import org.apache.log4j.DailyRollingFileAppender;
-import org.apache.log4j.FileAppender;
-import org.apache.log4j.Level;
-import org.apache.log4j.LogManager;
-import org.apache.log4j.Logger;
-import org.apache.log4j.PatternLayout;
-import org.apache.log4j.net.SyslogAppender;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Appender;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.appender.FileAppender;
+import org.apache.logging.log4j.core.appender.RollingFileAppender;
+import org.apache.logging.log4j.core.appender.SyslogAppender;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.layout.PatternLayout;
+import org.apache.logging.log4j.core.net.Facility;
 import org.wso2.carbon.base.ServerConfiguration;
 import org.wso2.carbon.context.CarbonContext;
 import org.wso2.carbon.core.util.SystemFilter;
 import org.wso2.carbon.logging.service.LogViewerException;
-import org.wso2.carbon.logging.service.appender.CarbonMemoryAppender;
+import org.wso2.carbon.logging.service.appenders.CarbonMemoryAppender;
 import org.wso2.carbon.logging.service.config.ServiceConfigManager;
 import org.wso2.carbon.logging.service.config.SyslogConfigManager;
 import org.wso2.carbon.logging.service.config.SyslogConfiguration;
@@ -74,6 +78,7 @@ public class LoggingUtil {
     private static final int MAX_LOG_MESSAGES = 200;
     private static final Log log = LogFactory.getLog(LoggingUtil.class);
     private static RegistryManager registryManager = new RegistryManager();
+    private static CarbonMemoryAppender carbonMemoryAppender;
 
     public static boolean isStratosService() throws Exception {
         String serviceName = ServerConfiguration.getInstance().getFirstProperty("ServerKey");
@@ -142,9 +147,8 @@ public class LoggingUtil {
     }
 
     public static boolean isFileAppenderConfiguredForST() {
-        Logger rootLogger = Logger.getRootLogger();
-        DailyRollingFileAppender logger = (DailyRollingFileAppender) rootLogger
-                .getAppender("CARBON_LOGFILE");
+        LoggerContext logContext = (LoggerContext) LogManager.getContext(false);
+        RollingFileAppender logger = logContext.getConfiguration().getAppender("CARBON_LOGFILE");
         if (logger != null
                 && CarbonContext.getThreadLocalCarbonContext().getTenantId() == org.wso2.carbon.base.MultitenantConstants.SUPER_TENANT_ID) {
             return true;
@@ -164,11 +168,13 @@ public class LoggingUtil {
         return false;
     }
 
+    //TODO: find a way to get root logger level
     public static String getSystemLogLevel() throws Exception {
         String systemLogLevel = registryManager
                 .getConfigurationProperty(LoggingConstants.SYSTEM_LOG_LEVEL);
         if (systemLogLevel == null) {
-            return Logger.getRootLogger().getLevel().toString();
+            Logger logger = (Logger) LogManager.getLogger(LogManager.getRootLogger());
+            return logger.getLevel().toString();
         }
         return systemLogLevel;
     }
@@ -207,7 +213,7 @@ public class LoggingUtil {
         // initial appender set should present in the system.
         // and all the initall logger should present in the system
         Set<Appender> appenderSet = new HashSet<Appender>();
-        Logger rootLogger = LogManager.getRootLogger();
+        Logger rootLogger = (Logger) LogManager.getRootLogger();
 
         // set the root logger level, if the system log level is changed.
         String persistedSystemLoggerLevel = registryManager
@@ -223,26 +229,28 @@ public class LoggingUtil {
         setSystemLoggingParameters(persistedSystemLoggerLevel,
                 (systemLogPatternChanged) ? persistedSystemLogPattern : SYSTEM_LOG_PATTERN);
 
-        addAppendersToSet(rootLogger.getAllAppenders(), appenderSet);
+        addAppendersToSet(new IteratorEnumeration(rootLogger.getAppenders().keySet().iterator()), appenderSet);
 
         // System log level has been changed, need to update all the loggers and
         // appenders
         if (systemLogLevelChanged) {
             Logger logger;
-            Enumeration loggersEnum = LogManager.getCurrentLoggers();
+            LoggerConfig loggerConfig = new LoggerConfig(rootLogger.getName(), null, false);
+            Enumeration loggersEnum = new IteratorEnumeration(loggerConfig.getAppenders().keySet().iterator());
+
             Level systemLevel = Level.toLevel(persistedSystemLoggerLevel);
             while (loggersEnum.hasMoreElements()) {
                 logger = (Logger) loggersEnum.nextElement();
                 // we ignore all class level defined loggers
-                addAppendersToSet(logger.getAllAppenders(), appenderSet);
+                addAppendersToSet(new IteratorEnumeration(logger.getAppenders().keySet().iterator()), appenderSet);
                 logger.setLevel(systemLevel);
             }
 
             for (Appender appender : appenderSet) {
-                if (appender instanceof AppenderSkeleton) {
-                    AppenderSkeleton appenderSkeleton = (AppenderSkeleton) appender;
-                    appenderSkeleton.setThreshold(systemLevel);
-                    appenderSkeleton.activateOptions();
+                if (appender instanceof AbstractAppender) {
+                    AbstractAppender abstractAppender = (AbstractAppender) appender;
+                    loggerConfig = new LoggerConfig(abstractAppender.getName(), null, false);
+                    loggerConfig.setLevel(systemLevel);
                 }
             }
         }
@@ -253,12 +261,12 @@ public class LoggingUtil {
             String[] loggerResourcePaths = loggerCollection.getChildren();
             for (String loggerResourcePath : loggerResourcePaths) {
                 String loggerName = loggerResourcePath.substring(LoggingConstants.LOGGERS.length());
-                Logger logger = LogManager.getLogger(loggerName);
+                Logger logger = (Logger) LogManager.getLogger(loggerName);
                 Resource loggerResource = registryManager.getLogger(loggerName);
                 if (loggerResource != null && logger != null) {
                     logger.setLevel(Level.toLevel(loggerResource
                             .getProperty(LoggingConstants.LoggerProperties.LOG_LEVEL)));
-                    logger.setAdditivity(Boolean.parseBoolean(loggerResource
+                    logger.setAdditive(Boolean.parseBoolean(loggerResource
                             .getProperty(LoggingConstants.LoggerProperties.ADDITIVITY)));
                 }
             }
@@ -276,9 +284,8 @@ public class LoggingUtil {
                 if (appenderResource != null && appender != null) {
                     if ((appender.getLayout() != null)
                             && (appender.getLayout() instanceof PatternLayout)) {
-                        ((PatternLayout) appender.getLayout())
-                                .setConversionPattern(appenderResource
-                                        .getProperty(LoggingConstants.AppenderProperties.PATTERN));
+                        ((PatternLayout) appender.getLayout()).newSerializerBuilder().
+                                setPattern(appenderResource.getProperty(LoggingConstants.AppenderProperties.PATTERN));
                     }
                     if (appender instanceof FileAppender) {
                         FileAppender fileAppender = ((FileAppender) appender);
@@ -289,8 +296,7 @@ public class LoggingUtil {
                         if (!logFilePath.isAbsolute()) {
                             logFilePath = Paths.get(System.getProperty(ServerConstants.CARBON_HOME)).resolve(logFilePath);
                         }
-                        fileAppender.setFile(logFilePath.normalize().toString());
-                        fileAppender.activateOptions();
+                        fileAppender.newBuilder().withFileName(logFilePath.normalize().toString()).build();
                     }
 
                     if (appender instanceof CarbonMemoryAppender) {
@@ -301,17 +307,18 @@ public class LoggingUtil {
 
                     if (appender instanceof SyslogAppender) {
                         SyslogAppender syslogAppender = (SyslogAppender) appender;
-                        syslogAppender.setSyslogHost(appenderResource
+                        syslogAppender.newSyslogAppenderBuilder().withHost(appenderResource
                                 .getProperty(LoggingConstants.AppenderProperties.SYS_LOG_HOST));
-                        syslogAppender.setFacility(appenderResource
-                                .getProperty(LoggingConstants.AppenderProperties.FACILITY));
+                        syslogAppender.newSyslogAppenderBuilder().setFacility(Facility.toFacility(appenderResource
+                                .getProperty(LoggingConstants.AppenderProperties.FACILITY)));
                     }
 
-                    if (appender instanceof AppenderSkeleton) {
-                        AppenderSkeleton appenderSkeleton = (AppenderSkeleton) appender;
-                        appenderSkeleton.setThreshold(Level.toLevel(appenderResource
+                    if (appender instanceof AbstractAppender) {
+                        AbstractAppender abstractAppender = (AbstractAppender) appender;
+                        LoggerConfig loggerConfig = new LoggerConfig(abstractAppender.getName(), null, false);
+                        loggerConfig = new LoggerConfig(abstractAppender.getName(), null, false);
+                        loggerConfig.setLevel(Level.toLevel(appenderResource
                                 .getProperty(LoggingConstants.AppenderProperties.THRESHOLD)));
-                        appenderSkeleton.activateOptions();
                     }
                 }
             }

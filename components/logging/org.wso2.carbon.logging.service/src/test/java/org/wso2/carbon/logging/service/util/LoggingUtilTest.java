@@ -18,20 +18,21 @@
 
 package org.wso2.carbon.logging.service.util;
 
-import org.apache.log4j.Appender;
-import org.apache.log4j.ConsoleAppender;
-import org.apache.log4j.SimpleLayout;
+import org.apache.logging.log4j.core.Appender;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.appender.ConsoleAppender;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
  * Unit tests for logging utils.
  */
-public class LoggingUtilTest {
+public class  LoggingUtilTest {
 
     private static final String APPENDER_NAME = "SIMPLE_APPENDER";
 
@@ -40,16 +41,12 @@ public class LoggingUtilTest {
                     "LoggingUtil.getAppenderFromSet method given that the Appender set contains an appender " +
                     "without a name.")
     public void testGettingAppenderFromAppenderSet() {
-        Appender appenderWithoutName = new ConsoleAppender(new SimpleLayout());
-
-        Appender appenderWithName = new ConsoleAppender(new SimpleLayout());
-        appenderWithName.setName(APPENDER_NAME);
+        Appender appenderWithName = ConsoleAppender.createDefaultAppenderForLayout(PatternLayout.createDefaultLayout());
 
         Set<Appender> appenderSet = new LinkedHashSet<>();
-        appenderSet.add(appenderWithoutName);
         appenderSet.add(appenderWithName);
 
-        Assert.assertEquals(appenderWithName, LoggingUtil.getAppenderFromSet(appenderSet, APPENDER_NAME),
+        Assert.assertEquals(appenderWithName, LoggingUtil.getAppenderFromSet(appenderSet, appenderWithName.getName()),
                 "Appender with the name " + APPENDER_NAME + " is not returned from getAppenderFromSet method.");
     }
 

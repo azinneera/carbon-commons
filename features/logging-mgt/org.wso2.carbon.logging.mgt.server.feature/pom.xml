@@ -40,6 +40,10 @@
             <artifactId>org.wso2.carbon.logging.service</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.wso2.carbon.commons</groupId>
+            <artifactId>org.wso2.carbon.logging.service.appenders</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.ws.wso2</groupId>
             <artifactId>spring.framework</artifactId>
         </dependency>
@@ -109,7 +113,7 @@
                                     <directory>resources</directory>
                                     <includes>
                                         <include>conf/logging-config.xml</include>
-                                        <include>conf/log4j.properties</include>
+                                        <include>conf/log4j2.properties</include>
                                         <include>p2.inf</include>
                                         <include>build.properties</include>
                                     </includes>
@@ -143,6 +147,7 @@
                             </adviceFile>
                             <bundles>
                                 <bundleDef>org.wso2.carbon.commons:org.wso2.carbon.logging.service</bundleDef>
+                                <bundleDef>org.wso2.carbon.commons:org.wso2.carbon.logging.service.appenders</bundleDef>
                                 <bundleDef>org.springframework.ws.wso2:spring.framework</bundleDef>
                                 <bundleDef>libthrift.wso2:libthrift</bundleDef>
                                 <bundleDef>org.perf4j.wso2:perf4j</bundleDef>

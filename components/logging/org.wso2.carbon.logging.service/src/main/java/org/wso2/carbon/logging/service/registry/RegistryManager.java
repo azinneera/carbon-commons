@@ -18,17 +18,18 @@ package org.wso2.carbon.logging.service.registry;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.log4j.Appender;
-import org.apache.log4j.AppenderSkeleton;
-import org.apache.log4j.FileAppender;
-import org.apache.log4j.Layout;
-import org.apache.log4j.Logger;
-import org.apache.log4j.PatternLayout;
-import org.apache.log4j.net.SyslogAppender;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.core.Appender;
+import org.apache.logging.log4j.core.Layout;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.appender.FileAppender;
+import org.apache.logging.log4j.core.appender.SyslogAppender;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.wso2.carbon.core.RegistryResources;
 import org.wso2.carbon.core.util.CryptoException;
 import org.wso2.carbon.core.util.CryptoUtil;
-import org.wso2.carbon.utils.logging.CircularBuffer;
 import org.wso2.carbon.logging.service.appender.CarbonMemoryAppender;
 import org.wso2.carbon.logging.service.config.SyslogConfigManager;
 import org.wso2.carbon.logging.service.config.SyslogConfiguration;
@@ -39,6 +40,7 @@ import org.wso2.carbon.registry.core.Registry;
 import org.wso2.carbon.registry.core.Resource;
 import org.wso2.carbon.registry.core.exceptions.RegistryException;
 import org.wso2.carbon.utils.ServerConstants;
+import org.wso2.carbon.utils.logging.CircularBuffer;
 
 import java.io.File;
 import java.io.IOException;
@@ -103,10 +105,10 @@ public class RegistryManager {
                     logger.getName());
             loggerResource.addProperty(
                     LoggingConstants.LoggerProperties.LOG_LEVEL, logger
-                            .getEffectiveLevel().toString());
+                            .getLevel().toString());
             loggerResource.addProperty(
                     LoggingConstants.LoggerProperties.ADDITIVITY,
-                    Boolean.toString(logger.getAdditivity()));
+                    Boolean.toString(logger.isAdditive()));
 
             registry.put(LoggingConstants.LOGGERS + logger.getName(),
                     loggerResource);
@@ -217,18 +219,16 @@ public class RegistryManager {
         try {
             registry.beginTransaction();
             Resource appenderResource = registry.newResource();
-            if (appender.requiresLayout()) {
-                Layout layout = appender.getLayout();
-                if (layout instanceof PatternLayout) {
-                    appenderResource.addProperty(
-                            LoggingConstants.AppenderProperties.PATTERN,
-                            ((PatternLayout) layout).getConversionPattern());
-                }
+            Layout layout = appender.getLayout();
+            if (layout instanceof PatternLayout) {
+                appenderResource.addProperty(
+                        LoggingConstants.AppenderProperties.PATTERN,
+                        ((PatternLayout) layout).getConversionPattern());
             }
 
             if (appender instanceof FileAppender) {
                 FileAppender fileAppender = (FileAppender) appender;
-                String fileName = fileAppender.getFile();
+                String fileName = fileAppender.getFileName();
                 File logFile = new File(fileName);
                 if (!logFile.isAbsolute()) {
                     if (fileName.startsWith(".")) {
@@ -236,8 +236,7 @@ public class RegistryManager {
                     }
                     fileName = (System.getProperty(ServerConstants.CARBON_HOME)
                             + "/" + fileName).replace('\\', '/');
-                    fileAppender.setFile(fileName);
-                    fileAppender.activateOptions();
+                    fileAppender.newBuilder().withFileName(fileName);
                 }
                 appenderResource.addProperty(
                         LoggingConstants.AppenderProperties.LOG_FILE_NAME,
@@ -259,12 +258,13 @@ public class RegistryManager {
             }
 
             // normally all the appenders inherit from AppenderSkelton
-            if (appender instanceof AppenderSkeleton) {
-                AppenderSkeleton appenderSkeleton = (AppenderSkeleton) appender;
-                if (appenderSkeleton.getThreshold() != null) {
+            if (appender instanceof AbstractAppender) {
+                AbstractAppender abstractAppender = (AbstractAppender) appender;
+                LoggerConfig loggerConfig = new LoggerConfig(abstractAppender.getName(), null, false);
+                if (loggerConfig.getLevel() != null) {
                     appenderResource.addProperty(
                             LoggingConstants.AppenderProperties.THRESHOLD,
-                            appenderSkeleton.getThreshold().toString());
+                            loggerConfig.getName().toString());
                 } else {
                     appenderResource.addProperty(
                             LoggingConstants.AppenderProperties.THRESHOLD,
@@ -279,10 +279,10 @@ public class RegistryManager {
                 // assign default values
                 appenderResource.addProperty(
                         LoggingConstants.AppenderProperties.SYS_LOG_HOST,
-                        syslogAppender.getSyslogHost());
+                        syslogAppender.newSyslogAppenderBuilder().getHost());
                 appenderResource.addProperty(
                         LoggingConstants.AppenderProperties.FACILITY,
-                        syslogAppender.getFacility());
+                        syslogAppender.newSyslogAppenderBuilder().getFacility().toString());
                 appenderResource
                         .addProperty(
                                 LoggingConstants.AppenderProperties.IS_SYS_LOG_APPENDER,
