@@ -89,8 +89,6 @@ public class InMemoryLogProvider implements LogProvider {
     public void init(LoggingConfig loggingConfig) {
         BundleContext bundleContext = FrameworkUtil.getBundle(InMemoryLogProvider.class).getBundleContext();
         try {
-            serviceRegistration = bundleContext.registerService(LogProvider.class.getName(),
-                    new InMemoryLogProvider(), null);
             ServiceReference serviceReference = bundleContext.getServiceReference(CarbonMemoryAppender.class);
             if(serviceReference != null) {
                 carbonMemoryAppender = (CarbonMemoryAppender) bundleContext.getService(serviceReference);
